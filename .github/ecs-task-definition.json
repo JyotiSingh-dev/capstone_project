@@ -1,6 +1,6 @@
 {
   "family": "commerceops-app-task",
-  "executionRoleArn": "arn:aws:iam::650338326424:role/ecsTaskExecutionRole",
+  "executionRoleArn": "arn:aws:iam::650338326424:role/ecsTaskExecutionRole1",
   "networkMode": "awsvpc",
   "requiresCompatibilities": [
     "FARGATE"
