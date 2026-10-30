@@ -13,7 +13,7 @@ env:
   ECR_FRONTEND_REPOSITORY: commerceops-frontend
   ECS_CLUSTER: commerceops-cluster
   ECS_SERVICE: commerceops-app-task-service-dm5dpr7e
-  ECS_TASK_DEFINITION: commerceops-app-task
+  ECS_SECURITY_GROUP: sg-0b821b64c8fe4f508
 
 jobs:
   validate:
@@ -155,123 +155,22 @@ jobs:
           docker push "$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:${{ github.sha }}"
           docker push "$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:latest"
 
-      - name: Download and prepare ECS task definition
+      - name: Prepare ECS task definition
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          aws ecs describe-task-definition \
-            --task-definition "$ECS_TASK_DEFINITION" \
-            --region "$AWS_REGION" \
-            --query "taskDefinition" \
-            > task-definition-current.json
-
           jq \
             --arg backend_image "$ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:${{ github.sha }}" \
             --arg frontend_image "$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:${{ github.sha }}" \
-            --arg openrouter_secret_arn "arn:aws:ssm:ap-south-1:650338326424:parameter/commerceops/openrouter-api-key" \
-            '
-            del(
-              .taskDefinitionArn,
-              .revision,
-              .status,
-              .requiresAttributes,
-              .compatibilities,
-              .registeredAt,
-              .registeredBy
-            )
-            |
-            .containerDefinitions |= map(
-
-              if .name == "seed" then
+            '.containerDefinitions |= map(
+              if .name == "seed" or .name == "backend" or .name == "worker" then
                 .image = $backend_image
-                |
-                .user = "0"
-                |
-                .command = [
-                  "sh",
-                  "-c",
-                  "mkdir -p /app/data && cp -a /app/bootstrap_data/. /app/data/ && python scripts/seed_db.py && chown -R commerceops:commerceops /app/data"
-                ]
-
-              elif .name == "backend" then
-                .image = $backend_image
-                |
-                (.secrets //= [])
-                |
-                .secrets |= (
-                  map(select(.name != "OPENROUTER_API_KEY"))
-                  + [{
-                    "name": "OPENROUTER_API_KEY",
-                    "valueFrom": $openrouter_secret_arn
-                  }]
-                )
-                |
-                .healthCheck = {
-                  "command": [
-                    "CMD",
-                    "python",
-                    "-c",
-                    "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\", timeout=3)"
-                  ],
-                  "interval": 30,
-                  "timeout": 5,
-                  "retries": 3,
-                  "startPeriod": 60
-                }
-
-              elif .name == "worker" then
-                .image = $backend_image
-                |
-                (.secrets //= [])
-                |
-                .secrets |= (
-                  map(select(.name != "OPENROUTER_API_KEY"))
-                  + [{
-                    "name": "OPENROUTER_API_KEY",
-                    "valueFrom": $openrouter_secret_arn
-                  }]
-                )
-                |
-                .command = [
-                  "python",
-                  "-m",
-                  "app.worker"
-                ]
-                |
-                .healthCheck = {
-                  "command": [
-                    "CMD",
-                    "python",
-                    "-c",
-                    "import socket; s=socket.create_connection((\"127.0.0.1\", 9100), timeout=3); s.close()"
-                  ],
-                  "interval": 30,
-                  "timeout": 5,
-                  "retries": 3,
-                  "startPeriod": 30
-                }
-
               elif .name == "frontend" then
                 .image = $frontend_image
-                |
-                .healthCheck = {
-                  "command": [
-                    "CMD",
-                    "python",
-                    "-c",
-                    "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8501/_stcore/health\", timeout=3)"
-                  ],
-                  "interval": 30,
-                  "timeout": 5,
-                  "retries": 3,
-                  "startPeriod": 60
-                }
-
               else
                 .
               end
-            )
-            ' task-definition-current.json \
+            )' .github/ecs-task-definition.json \
             > task-definition-new.json
 
       - name: Show prepared container configuration
@@ -306,6 +205,7 @@ jobs:
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$ECS_SERVICE" \
+            --network-configuration "awsvpcConfiguration={subnets=[subnet-08a35c83b8344c89a,subnet-08190c63c688b0fb1,subnet-026dd380aebab2844],securityGroups=[$ECS_SECURITY_GROUP],assignPublicIp=ENABLED}" \
             --task-definition "${{ steps.register-task.outputs.task_definition_arn }}" \
             --force-new-deployment \
             --region "$AWS_REGION"

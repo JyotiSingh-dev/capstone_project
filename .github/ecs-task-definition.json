@@ -1,0 +1,312 @@
+{
+  "family": "commerceops-app-task",
+  "executionRoleArn": "arn:aws:iam::650338326424:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "2048",
+  "memory": "6144",
+  "runtimePlatform": {
+    "operatingSystemFamily": "LINUX",
+    "cpuArchitecture": "X86_64"
+  },
+  "volumes": [
+    {
+      "name": "app-data"
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "redis",
+      "image": "redis:7-alpine",
+      "essential": true,
+      "cpu": 128,
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ],
+        "interval": 10,
+        "timeout": 5,
+        "retries": 5,
+        "startPeriod": 10
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/commerceops-app-task",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "redis",
+          "mode": "non-blocking"
+        }
+      }
+    },
+    {
+      "name": "seed",
+      "image": "commerceops-backend:latest",
+      "essential": false,
+      "cpu": 128,
+      "user": "0",
+      "command": [
+        "sh",
+        "-c",
+        "mkdir -p /app/data && cp -a /app/bootstrap_data/. /app/data/ && python scripts/seed_db.py && chown -R commerceops:commerceops /app/data"
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "app-data",
+          "containerPath": "/app/data"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/commerceops-app-task",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "seed",
+          "mode": "non-blocking"
+        }
+      }
+    },
+    {
+      "name": "backend",
+      "image": "commerceops-backend:latest",
+      "essential": true,
+      "cpu": 768,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "REDIS_URL",
+          "value": "redis://127.0.0.1:6379/0"
+        },
+        {
+          "name": "DATA_DIR",
+          "value": "/app/data"
+        },
+        {
+          "name": "SQLITE_DB_PATH",
+          "value": "/app/data/commerceops.db"
+        },
+        {
+          "name": "CHECKPOINT_DB_PATH",
+          "value": "/app/data/checkpoints.db"
+        },
+        {
+          "name": "CHROMA_DIR",
+          "value": "/app/data/chroma"
+        },
+        {
+          "name": "KNOWLEDGE_GRAPH_PATH",
+          "value": "/app/data/knowledge_graph.json"
+        },
+        {
+          "name": "INTENT_ROUTER_MODEL_PATH",
+          "value": "/app/data/intent_router.joblib"
+        },
+        {
+          "name": "MCP_SQLITE_DB_PATH",
+          "value": "/app/data/commerceops.db"
+        },
+        {
+          "name": "PHOENIX_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "APP_ENV",
+          "value": "production"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "OPENROUTER_API_KEY",
+          "valueFrom": "arn:aws:ssm:ap-south-1:650338326424:parameter/commerceops/openrouter-api-key"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "app-data",
+          "containerPath": "/app/data"
+        }
+      ],
+      "dependsOn": [
+        {
+          "containerName": "redis",
+          "condition": "HEALTHY"
+        },
+        {
+          "containerName": "seed",
+          "condition": "SUCCESS"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\", timeout=3)"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/commerceops-app-task",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "backend",
+          "mode": "non-blocking"
+        }
+      }
+    },
+    {
+      "name": "worker",
+      "image": "commerceops-backend:latest",
+      "essential": true,
+      "cpu": 512,
+      "command": [
+        "python",
+        "-m",
+        "app.worker"
+      ],
+      "environment": [
+        {
+          "name": "REDIS_URL",
+          "value": "redis://127.0.0.1:6379/0"
+        },
+        {
+          "name": "DATA_DIR",
+          "value": "/app/data"
+        },
+        {
+          "name": "SQLITE_DB_PATH",
+          "value": "/app/data/commerceops.db"
+        },
+        {
+          "name": "CHECKPOINT_DB_PATH",
+          "value": "/app/data/checkpoints.db"
+        },
+        {
+          "name": "CHROMA_DIR",
+          "value": "/app/data/chroma"
+        },
+        {
+          "name": "KNOWLEDGE_GRAPH_PATH",
+          "value": "/app/data/knowledge_graph.json"
+        },
+        {
+          "name": "INTENT_ROUTER_MODEL_PATH",
+          "value": "/app/data/intent_router.joblib"
+        },
+        {
+          "name": "MCP_SQLITE_DB_PATH",
+          "value": "/app/data/commerceops.db"
+        },
+        {
+          "name": "PHOENIX_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "APP_ENV",
+          "value": "production"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "OPENROUTER_API_KEY",
+          "valueFrom": "arn:aws:ssm:ap-south-1:650338326424:parameter/commerceops/openrouter-api-key"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "app-data",
+          "containerPath": "/app/data"
+        }
+      ],
+      "dependsOn": [
+        {
+          "containerName": "redis",
+          "condition": "HEALTHY"
+        },
+        {
+          "containerName": "seed",
+          "condition": "SUCCESS"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; s=socket.create_connection((\"127.0.0.1\", 9100), timeout=3); s.close()"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/commerceops-app-task",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "worker",
+          "mode": "non-blocking"
+        }
+      }
+    },
+    {
+      "name": "frontend",
+      "image": "commerceops-frontend:latest",
+      "essential": true,
+      "cpu": 256,
+      "portMappings": [
+        {
+          "containerPort": 8501,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "API_BASE_URL",
+          "value": "http://127.0.0.1:8000"
+        }
+      ],
+      "dependsOn": [
+        {
+          "containerName": "backend",
+          "condition": "HEALTHY"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8501/_stcore/health\", timeout=3)"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/commerceops-app-task",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "frontend",
+          "mode": "non-blocking"
+        }
+      }
+    }
+  ]
+}
