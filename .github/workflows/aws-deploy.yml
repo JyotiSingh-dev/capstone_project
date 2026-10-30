@@ -159,6 +159,9 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
+          jq -e '([.containerDefinitions[].name] | sort) == ["backend", "frontend", "redis", "seed", "worker"]' \
+            .github/ecs-task-definition.json > /dev/null
+
           jq \
             --arg backend_image "$ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:${{ github.sha }}" \
             --arg frontend_image "$ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:${{ github.sha }}" \
