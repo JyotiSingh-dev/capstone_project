@@ -12,7 +12,7 @@ env:
   ECR_BACKEND_REPOSITORY: commerceops-backend
   ECR_FRONTEND_REPOSITORY: commerceops-frontend
   ECS_CLUSTER: commerceops-cluster
-  ECS_SERVICE: commerceops-service
+  ECS_SERVICE: commerceops-app-task-service-dm5dpr7e
   ECS_TASK_DEFINITION: commerceops-app-task
 
 jobs:
